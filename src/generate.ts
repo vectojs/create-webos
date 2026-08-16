@@ -31,7 +31,7 @@ export const APP_NAME_RE = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 
 const SEED_GEOMETRY: ReadonlyArray<readonly [number, number, number, number]> = [
   [200, 36, 540, 380],
-  [560, 80, 520, 400],
+  [560, 80, 520, 470],
 ];
 
 function templateRoot(): string {
