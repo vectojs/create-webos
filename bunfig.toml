@@ -1,0 +1,4 @@
+[test]
+# The embedded template is a separate project (its tests run inside
+# generated projects, not here).
+exclude = ["template/**"]

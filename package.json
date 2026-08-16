@@ -1,0 +1,42 @@
+{
+  "name": "create-webos",
+  "version": "0.1.0",
+  "description": "Scaffold a VectoJS desktop website: bun create webos",
+  "type": "module",
+  "bin": {
+    "create-webos": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "template"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "bun test test/scaffold.test.ts",
+    "test:e2e": "bun test test/generated-gates.test.ts",
+    "format": "oxfmt --write \"{src,test,scripts}/**/*.{js,ts,jsx,tsx,mjs,cjs,json}\"",
+    "format:check": "oxfmt --check \"{src,test,scripts}/**/*.{js,ts,jsx,tsx,mjs,cjs,json}\"",
+    "lint": "oxlint --deny-warnings src test scripts",
+    "lint:md": "markdownlint-cli2 \"**/*.md\" !template/**",
+    "check": "bun run format:check && bun run lint && bun run lint:md"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "keywords": [
+    "vectojs",
+    "desktop",
+    "canvas",
+    "scaffold",
+    "template",
+    "webos"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "markdownlint-cli2": "^0.23.2",
+    "oxfmt": "^0.61.0",
+    "oxlint": "^1.76.0",
+    "typescript": "^7.0.2"
+  }
+}
