@@ -5,12 +5,60 @@
  * A 1s interval refreshes the readout and pauses while minimized (D8).
  */
 
-import type { Entity } from '@vectojs/core';
+import { Entity, type IRenderer } from '@vectojs/core';
 import type { AppDefinition, WindowManager } from '@vectojs/desktop';
-import { Button, Stack, Text } from '@vectojs/ui';
-import { ClientRoot, hstack, t, vstack } from '../app/ui-helpers';
+import { DOCUMENT_SCROLL_PHYSICS, ScrollView, Stack, Text } from '@vectojs/ui';
+import { btn, ClientRoot, hstack, p, t, themedButton, vstack } from '../app/ui-helpers';
 import { isWindowVisible } from '../app/window-utils';
+import { appIconSvg } from '../desktop/icons';
 import { FrameSampler } from '../model/telemetry';
+
+class SysmonLayout extends Entity {
+  constructor(
+    private readonly scroll: ScrollView,
+    private readonly rows: Text[],
+    private readonly top: Stack,
+    private readonly windowsHost: Stack,
+    private readonly gap = 10,
+  ) {
+    super();
+    this.clipChildren = true;
+    this.add(scroll);
+  }
+
+  public override isPointInside(gx: number, gy: number): boolean {
+    const local = this.worldToLocal(gx, gy);
+    if (!local) return false;
+    return local.x >= 0 && local.y >= 0 && local.x <= this.width && local.y <= this.height;
+  }
+
+  public override render(_r: IRenderer): void {
+    const width = Math.max(0, this.width);
+    for (const row of this.rows) row.setMaxWidth(width);
+    this.scroll.x = 0;
+    this.scroll.y = 0;
+    this.scroll.width = width;
+    this.scroll.height = Math.max(0, this.height);
+    for (const child of this.windowsHost.children) {
+      if (!(child instanceof Stack)) continue;
+      const [label, close] = child.children;
+      if (!label || !close) continue;
+      close.width = 28;
+      label.width = Math.max(0, width - close.width - child.gap);
+      child.layout();
+    }
+    this.top.width = width;
+    this.top.layout();
+    this.windowsHost.width = width;
+    this.windowsHost.layout();
+    this.top.x = 0;
+    this.top.y = 0;
+    this.windowsHost.x = 0;
+    this.windowsHost.y = this.top.height + this.gap;
+    this.scroll.content.width = width;
+    this.scroll.content.height = this.windowsHost.y + this.windowsHost.height;
+  }
+}
 
 class SysmonRoot extends ClientRoot {
   private readonly rows: Text[];
@@ -22,40 +70,40 @@ class SysmonRoot extends ClientRoot {
   private lastFrameAt = 0;
 
   constructor(wm: WindowManager) {
-    const vmt = new Text('', { font: '500 12px monospace', color: '#0f172a' });
-    const a11y = new Text('', { font: '500 12px monospace', color: '#0f172a' });
-    const frames = new Text('', {
-      font: '500 12px monospace',
-      color: '#0f172a',
+    const rows = ['', '', '', '', ''].map((content) => {
+      const row = t(content, 12);
+      row.font = '500 12px monospace';
+      return row;
     });
-    const budget = new Text('', {
-      font: '500 12px monospace',
-      color: '#0f172a',
-    });
-    const dpr = new Text('', { font: '500 12px monospace', color: '#0f172a' });
+    const [vmt, a11y, frames, budget, dpr] = rows;
 
     const windowsHost = new Stack({ direction: 'vertical', gap: 2 });
     windowsHost.interactive = false;
 
-    super(
-      vstack(
-        [
-          t('System Telemetry', 16),
-          t('Live VectoJS scene statistics.', 12, '#475569', false),
-          vmt,
-          a11y,
-          frames,
-          budget,
-          dpr,
-          t('Windows', 14),
-          t('Click a row to focus, ✕ to close.', 11, '#94a3b8', false),
-          windowsHost,
-        ],
-        8,
-      ),
-      18,
+    const top = vstack(
+      [
+        t('System Telemetry', 16),
+        t('Live VectoJS scene statistics.', 12, '#475569', false),
+        vmt,
+        a11y,
+        frames,
+        budget,
+        dpr,
+        t('Windows', 14),
+        p('Click a row to focus, ✕ to close.', 11),
+      ],
+      8,
     );
-    this.rows = [vmt, a11y, frames, budget, dpr];
+    const scroll = new ScrollView({
+      width: 400,
+      height: 120,
+      scrollPhysics: DOCUMENT_SCROLL_PHYSICS,
+    });
+    scroll.content.add(top, windowsHost);
+    const layout = new SysmonLayout(scroll, rows, top, windowsHost);
+
+    super(layout, 18);
+    this.rows = rows;
     this.windowsHost = windowsHost;
     this.wm = wm;
   }
@@ -99,44 +147,26 @@ class SysmonRoot extends ClientRoot {
     }
     const wins = this.wm.list();
     if (wins.length === 0) {
-      const empty = new Text('(no windows)', {
-        font: '400 11px "Segoe UI", system-ui, sans-serif',
-        color: '#94a3b8',
-      });
+      const empty = p('(no windows)', 11);
       this.windowsHost.add(empty);
       return;
     }
     for (const w of wins) {
       const glyph = w.minimized ? '▁' : w.focused ? '▮' : '□';
-      const label = new Button(`${glyph} ${w.title}  (${w.appId})`, {
-        bg: '#f8fafc',
-        hoverBg: '#e2e8f0',
-        color: '#0f172a',
-        font: '500 11px "Segoe UI", system-ui, sans-serif',
-        padding: 4,
-        radius: 4,
-        height: 22,
-        onClick: () => {
-          this.wm.focus(w);
-          this.scene?.markDirty();
-        },
+      const state = w.focused ? 'focused' : w.minimized ? 'minimized' : 'open';
+      const label = btn(`${glyph} ${w.title}  (${w.appId}, ${state})`, false, () => {
+        this.wm.focus(w);
+        this.scene?.markDirty();
       });
-      label.a11yProjection = 'eager';
-      const close = new Button('✕', {
-        bg: '#fee2e2',
-        hoverBg: '#fecaca',
-        color: '#b91c1c',
-        font: '700 11px "Segoe UI", system-ui, sans-serif',
-        padding: 4,
-        radius: 4,
-        height: 22,
-        onClick: () => {
-          this.wm.close(w);
-          this.scene?.markDirty();
-        },
+      label.height = 22;
+      const close = themedButton('✕', 'danger', () => {
+        this.wm.close(w);
+        this.scene?.markDirty();
       });
-      close.a11yProjection = 'eager';
-      this.windowsHost.add(hstack([label, close], 4));
+      close.height = 22;
+      const row = hstack([label, close], 4);
+      row.height = 22;
+      this.windowsHost.add(row);
     }
   }
 
@@ -175,9 +205,11 @@ function fmt(v: number | null): string {
 export const sysmonApp: AppDefinition = {
   id: 'sysmon',
   title: 'Task Manager',
-  icon: '📊',
+  iconSvg: appIconSvg('sysmon'),
   instances: 'single',
   defaultWidth: 460,
   defaultHeight: 420,
+  minWidth: 340,
+  minHeight: 300,
   create: (ctx) => new SysmonRoot(ctx.windowManager),
 };

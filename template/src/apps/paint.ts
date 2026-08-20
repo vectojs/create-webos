@@ -6,6 +6,7 @@
 import type { IRenderer } from '@vectojs/core';
 import { Entity } from '@vectojs/core';
 import type { AppDefinition } from '@vectojs/desktop';
+import { appIconSvg } from '../desktop/icons';
 
 interface PaintStroke {
   points: { x: number; y: number }[];
@@ -183,9 +184,11 @@ class PaintRoot extends Entity {
 export const paintApp: AppDefinition = {
   id: 'paint',
   title: 'Paint Studio',
-  icon: '🎨',
+  iconSvg: appIconSvg('paint'),
   instances: 'multiple',
   defaultWidth: 600,
   defaultHeight: 420,
+  minWidth: 360,
+  minHeight: 300,
   create: () => new PaintRoot(),
 };

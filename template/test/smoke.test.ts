@@ -4,6 +4,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { Entity } from '@vectojs/core';
+import { Button } from '@vectojs/ui';
 import type { Scene } from '@vectojs/core';
 import type { DesktopShell } from '@vectojs/desktop';
 
@@ -55,5 +57,72 @@ describe('boot smoke', () => {
     expect(tree).toContain('toolbar'); // taskbar
     expect(tree).toContain('dialog'); // windows
     expect(tree).toContain('button'); // taskbar entries / chrome buttons
+  });
+
+  it('uses stable SVG icons for every registered app', () => {
+    const { shell } = api();
+    expect(shell.config.apps).toHaveLength(10);
+    expect(shell.config.apps.every((app) => typeof app.iconSvg === 'string')).toBe(true);
+    expect(shell.config.apps.every((app) => app.icon === undefined)).toBe(true);
+  });
+
+  it('keeps every app inside its minimum window geometry', async () => {
+    const { scene, shell } = api();
+    const specs = [
+      ['terminal', 420, 280],
+      ['files', 420, 340],
+      ['notes', 440, 320],
+      ['paint', 360, 300],
+      ['browser', 440, 320],
+      ['calculator', 240, 280],
+      ['sysmon', 340, 300],
+      ['settings', 420, 340],
+      ['clock', 260, 220],
+      ['about', 400, 300],
+    ] as const;
+
+    for (const [appId, width, height] of specs) {
+      for (const win of [...shell.windowManager.list()]) shell.windowManager.close(win);
+      const win = shell.open(appId);
+      win.setGeometry(8, 8, width, height);
+      for (let i = 0; i < 4; i++) scene.step(16.67);
+
+      const overflow = (await api().audit()).filter((finding) => finding.kind !== 'overlap');
+      expect(overflow, `${appId} overflowed at ${width}x${height}`).toEqual([]);
+    }
+  });
+
+  it('projects disabled browser history controls and focused window state', async () => {
+    const { scene, shell } = api();
+    for (const win of [...shell.windowManager.list()]) shell.windowManager.close(win);
+    shell.open('browser');
+    for (let i = 0; i < 4; i++) scene.step(16.67);
+    const descendants = (root: Entity): Entity[] => {
+      const result: Entity[] = [];
+      const visit = (entity: Entity): void => {
+        result.push(entity);
+        for (const child of entity.children) visit(child);
+      };
+      visit(root);
+      return result;
+    };
+
+    const browser = shell.windowManager.list().find((win) => win.appId === 'browser');
+    if (!browser) throw new Error('Missing browser window');
+    const browserButtons = descendants(browser).filter(
+      (entity): entity is Button => entity instanceof Button,
+    );
+    expect(browserButtons.find((button) => button.label === '◀ Back')?.disabled).toBe(true);
+    expect(browserButtons.find((button) => button.label === 'Forward ▶')?.disabled).toBe(true);
+
+    shell.open('sysmon');
+    for (let i = 0; i < 4; i++) scene.step(16.67);
+    const sysmon = shell.windowManager.list().find((win) => win.appId === 'sysmon');
+    if (!sysmon) throw new Error('Missing sysmon window');
+    expect(
+      descendants(sysmon).some(
+        (entity) => entity instanceof Button && entity.label.includes('(browser, focused)'),
+      ),
+    ).toBe(true);
   });
 });

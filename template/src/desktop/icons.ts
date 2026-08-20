@@ -11,7 +11,7 @@ import { Text } from '@vectojs/ui';
 interface IconDef {
   /** Full `<svg>` source for the 24x24 viewBox icon. */
   svg: string;
-  /** Emoji fallback label shown while the SVG rasterizes. */
+  /** Legacy text fallback for consumers that cannot render SVG. */
   emoji: string;
 }
 
@@ -109,6 +109,11 @@ const ICON_DEFS: Record<string, IconDef> = {
   ),
 };
 
+/** Return the stable SVG source used by shell chrome for an app id. */
+export function appIconSvg(appId: string): string | undefined {
+  return ICON_DEFS[appId]?.svg;
+}
+
 export interface DesktopIconSpec {
   id: string;
   appId: string;
@@ -118,6 +123,7 @@ export interface DesktopIconSpec {
 /** One desktop shortcut: SVG icon + label, hover/select highlight, double-click launch. */
 export class DesktopIcon extends Entity {
   private hovered = false;
+  private focused = false;
   private selected = false;
   private lastClickTime = 0;
   private readonly icon: SVGEntity;
@@ -157,6 +163,14 @@ export class DesktopIcon extends Entity {
     });
     this.on('pointerleave', () => {
       this.hovered = false;
+      this.scene?.markDirty();
+    });
+    this.on('focus', () => {
+      this.focused = true;
+      this.scene?.markDirty();
+    });
+    this.on('blur', () => {
+      this.focused = false;
       this.scene?.markDirty();
     });
     this.on('pointerdown', (e) => {
@@ -203,11 +217,14 @@ export class DesktopIcon extends Entity {
   public override render(r: IRenderer): void {
     // ui Text has no center align — center the measured label under the icon.
     this.label.x = Math.max(0, Math.round((this.width - this.label.width) / 2));
-    if (this.selected || this.hovered) {
+    if (this.selected || this.hovered || this.focused) {
       r.beginPath();
       r.roundRect(0, 0, this.width, this.height, 6);
       r.fill(this.selected ? 'rgba(255, 255, 255, 0.28)' : 'rgba(255, 255, 255, 0.14)');
-      r.stroke(this.selected ? 'rgba(255, 255, 255, 0.65)' : 'rgba(255, 255, 255, 0.35)', 1);
+      r.stroke(
+        this.selected || this.focused ? 'rgba(255, 255, 255, 0.9)' : 'rgba(255, 255, 255, 0.35)',
+        this.focused ? 2 : 1,
+      );
     }
   }
 }

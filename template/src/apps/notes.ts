@@ -3,23 +3,59 @@
  * Save/Reload/Clear round-trips through the VFS.
  */
 
+import { Entity, type IRenderer } from '@vectojs/core';
 import type { AppContext, AppDefinition, Vfs } from '@vectojs/desktop';
-import { Text, TextArea } from '@vectojs/ui';
-import { btn, ClientRoot, hstack, p, vstack } from '../app/ui-helpers';
+import { Stack, Text, TextArea } from '@vectojs/ui';
+import { btn, ClientRoot, hstack, p, ThemedTextArea } from '../app/ui-helpers';
+import { appIconSvg } from '../desktop/icons';
 
 let noteCounter = 0;
+
+class NotesLayout extends Entity {
+  constructor(
+    private readonly status: Text,
+    private readonly area: TextArea,
+    private readonly toolbar: Stack,
+    private readonly gap = 10,
+  ) {
+    super();
+    this.clipChildren = true;
+    this.add(status, area, toolbar);
+  }
+
+  public override isPointInside(gx: number, gy: number): boolean {
+    const local = this.worldToLocal(gx, gy);
+    if (!local) return false;
+    return local.x >= 0 && local.y >= 0 && local.x <= this.width && local.y <= this.height;
+  }
+
+  public override render(_r: IRenderer): void {
+    const width = Math.max(0, this.width);
+    this.status.setMaxWidth(width);
+    this.status.x = 0;
+    this.status.y = 0;
+    this.toolbar.x = 0;
+    this.toolbar.y = Math.max(0, this.height - this.toolbar.height);
+    this.area.x = 0;
+    this.area.y = this.status.height + this.gap;
+    this.area.width = width;
+    this.area.height = Math.max(0, this.toolbar.y - this.gap - this.area.y);
+  }
+}
 
 export const notesApp: AppDefinition = {
   id: 'notes',
   title: 'Untitled - Notepad',
-  icon: '📝',
+  iconSvg: appIconSvg('notes'),
   instances: 'multiple',
   defaultWidth: 540,
   defaultHeight: 420,
+  minWidth: 440,
+  minHeight: 320,
   create: (ctx: AppContext) => {
     noteCounter++;
     const path = `/notes/note-${noteCounter}.txt`;
-    const area = new TextArea({
+    const area = new ThemedTextArea({
       value: 'Welcome to VectoJS Notes!\nEdit your notes and save directly to VFS.\n',
       placeholder: 'Type your note…',
       font: '13px "Consolas", monospace',
@@ -42,8 +78,7 @@ export const notesApp: AppDefinition = {
       ],
       8,
     );
-    const stack = vstack([status, area, toolBar], 10);
-    return new ClientRoot(stack, 16);
+    return new ClientRoot(new NotesLayout(status, area, toolBar), 16);
   },
 };
 

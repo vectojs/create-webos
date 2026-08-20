@@ -11,8 +11,9 @@ import type { IRenderer } from '@vectojs/core';
 import { Entity } from '@vectojs/core';
 import type { AppContext, AppDefinition } from '@vectojs/desktop';
 import { Button, Text } from '@vectojs/ui';
-import { btn } from '../app/ui-helpers';
+import { btn, t } from '../app/ui-helpers';
 import { isWindowFocused } from '../app/window-utils';
+import { appIconSvg } from '../desktop/icons';
 import { CalculatorModel, type CalcOp } from '../model/calculator';
 
 const OP_KEYS = ['÷', '×', '-', '+'];
@@ -31,10 +32,8 @@ class CalculatorRoot extends Entity {
     super();
     this.clipChildren = true;
 
-    this.displayLabel = new Text('0', {
-      font: '700 24px "Segoe UI", system-ui, sans-serif',
-      color: '#0f172a',
-    });
+    this.displayLabel = t('0', 24);
+    this.displayLabel.font = '700 24px "Segoe UI", system-ui, sans-serif';
     this.displayLabel.height = DISPLAY_H;
     this.displayLabel.interactive = false;
     this.add(this.displayLabel);
@@ -79,7 +78,7 @@ class CalculatorRoot extends Entity {
         b.width = btnW;
         x += btnW + GAP;
       }
-      y += BTN_H + 8;
+      y += BTN_H + 7;
     }
   }
 
@@ -148,9 +147,11 @@ class CalculatorRoot extends Entity {
 export const calculatorApp: AppDefinition = {
   id: 'calculator',
   title: 'Calculator',
-  icon: '🔢',
+  iconSvg: appIconSvg('calculator'),
   instances: 'single',
   defaultWidth: 280,
   defaultHeight: 330,
+  minWidth: 240,
+  minHeight: 280,
   create: (_ctx: AppContext) => new CalculatorRoot(),
 };
