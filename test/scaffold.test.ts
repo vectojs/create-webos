@@ -39,6 +39,7 @@ describe('scaffold', () => {
 
     const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
     expect(pkg.name).toBe('my-desktop');
+    expect(pkg.dependencies['@vectojs/desktop']).toBe('0.6.0');
     expect(pkg.scripts.deploy).toContain('my-desktop-pages');
 
     const html = readFileSync(join(dir, 'index.html'), 'utf8');
@@ -48,6 +49,12 @@ describe('scaffold', () => {
     const config = readFileSync(join(dir, 'src/config.ts'), 'utf8');
     expect(config).toContain('DEFAULT_PRESET = aeroPreset');
     expect((config.match(/import \{ [^}]+\} from '\.\/apps\//g) ?? []).length).toBe(10);
+
+    const appSources = templateAppIds().map((id) =>
+      readFileSync(join(dir, `src/apps/${id}.ts`), 'utf8'),
+    );
+    expect(appSources.every((source) => source.includes('iconSvg: appIconSvg('))).toBe(true);
+    expect(appSources.every((source) => !/\n\s*icon:\s*['"]/.test(source))).toBe(true);
 
     const ci = readFileSync(join(dir, '.github/workflows/ci.yml'), 'utf8');
     expect(ci).toContain('my-desktop-pages');

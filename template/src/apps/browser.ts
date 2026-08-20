@@ -1,13 +1,21 @@
 /**
- * Browser app — an honestly-labeled demo browser: a real address bar
- * (`@vectojs/ui` Input, the sanctioned DOM exception for text entry) with
- * Enter-to-navigate, Back/Forward history, and internal `vectojs://` pages.
- * No network fetches — page content lives in-code.
+ * Browser app — a text-mode browser: a real address bar (`@vectojs/ui` Input,
+ * the sanctioned DOM exception for text entry) with Enter-to-navigate and
+ * Back/Forward history.
+ *
+ * `vectojs://…` addresses render internal in-code pages. `http(s)://…`
+ * addresses fetch the real page through the `webos-proxy` Cloudflare Worker
+ * (`https://proxy.vectojs.org/?url=…`), which strips HTML to plain text
+ * server-side — so the Zero-DOM canvas browser sidesteps both CORS and
+ * X-Frame-Options by never iframing anything. The page body lives in a
+ * `ScrollView`, so long fetched pages scroll instead of clipping.
  */
 
 import type { AppDefinition } from '@vectojs/desktop';
-import { Input } from '@vectojs/ui';
-import { btn, ClientRoot, hstack, p, t, vstack } from '../app/ui-helpers';
+import { Entity, type IRenderer } from '@vectojs/core';
+import { DOCUMENT_SCROLL_PHYSICS, ScrollView, Stack, Text } from '@vectojs/ui';
+import { btn, ClientRoot, p, t, ThemedInput, vstack } from '../app/ui-helpers';
+import { appIconSvg } from '../desktop/icons';
 import { HRule } from './_hrule';
 
 interface Page {
@@ -20,7 +28,8 @@ const PAGES: Record<string, Page> = {
     title: 'Welcome to VectoJS WebOS',
     body:
       'VectoJS is a modern Canvas-native UI runtime with a Virtual Math Tree, semantic a11y DOM projection, and WebGL/WebGPU backends.\n\n' +
-      '• Zero DOM overhead\n• Hardware accelerated rendering\n• Full keyboard navigation & screen-reader compatibility',
+      '• Zero DOM overhead\n• Hardware accelerated rendering\n• Full keyboard navigation & screen-reader compatibility\n\n' +
+      'Try a real URL above, e.g. https://example.com',
   },
   'vectojs://docs': {
     title: 'VectoJS Developer Documentation',
@@ -41,58 +50,179 @@ const PAGES: Record<string, Page> = {
 };
 
 const HOME = 'vectojs://home';
+const PROXY_URL = 'https://proxy.vectojs.org/?url=';
+const BODY_WIDTH = 570;
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+/**
+ * Fills the browser client area: a top bar (nav + address + title), a bottom
+ * status band, and a ScrollView that takes every pixel in between — so the page
+ * body grows/shrinks with the window instead of clipping (the outer Stack lays
+ * out once and cannot give a child the remaining height).
+ */
+class BrowserLayout extends Entity {
+  constructor(
+    private readonly top: Entity,
+    private readonly scroll: ScrollView,
+    private readonly bottom: Entity,
+    private readonly gap = 10,
+  ) {
+    super();
+    this.clipChildren = true;
+    this.add(top, scroll, bottom);
+  }
+
+  public override isPointInside(gx: number, gy: number): boolean {
+    const local = this.worldToLocal(gx, gy);
+    if (!local) return false;
+    return local.x >= 0 && local.y >= 0 && local.x <= this.width && local.y <= this.height;
+  }
+
+  public override render(_r: IRenderer): void {
+    const width = Math.max(0, this.width);
+    const navBar = this.top.children[0];
+    if (navBar instanceof Stack) {
+      navBar.maxWidth = width;
+      navBar.layout();
+    }
+    const addressBar = this.top.children[1];
+    if (addressBar instanceof Entity) addressBar.width = width;
+    const pageTitle = this.top.children[3];
+    if (pageTitle instanceof Text && pageTitle.maxWidth !== width) pageTitle.setMaxWidth(width);
+    const status = this.bottom.children[1];
+    if (status instanceof Text && status.maxWidth !== width) status.setMaxWidth(width);
+    const bodyText = this.scroll.content.children[0];
+    if (bodyText instanceof Text && bodyText.maxWidth !== width) bodyText.setMaxWidth(width);
+    this.top.width = width;
+    if (this.top instanceof Stack) this.top.layout();
+    this.bottom.width = width;
+    if (this.bottom instanceof Stack) this.bottom.layout();
+    this.top.x = 0;
+    this.top.y = 0;
+    const scrollY = this.top.height + this.gap;
+    this.scroll.x = 0;
+    this.scroll.y = scrollY;
+    this.scroll.width = width;
+    this.scroll.height = Math.max(0, this.height - scrollY - this.gap - this.bottom.height);
+    this.scroll.content.width = width;
+    this.scroll.content.height = Math.max(bodyText?.height ?? 0, this.scroll.height);
+    this.bottom.x = 0;
+    this.bottom.y = this.height - this.bottom.height;
+  }
+}
 
 export const browserApp: AppDefinition = {
   id: 'browser',
   title: 'Web Browser',
-  icon: '🌐',
+  iconSvg: appIconSvg('browser'),
   instances: 'single',
   defaultWidth: 640,
   defaultHeight: 460,
+  minWidth: 440,
+  minHeight: 320,
   create: () => {
-    const addressBar = new Input({
+    const addressBar = new ThemedInput({
       width: 460,
       value: HOME,
-      placeholder: 'vectojs://…',
+      placeholder: 'vectojs://… or https://…',
       font: '500 12px "Consolas", monospace',
     });
-    const pageTitle = t('Welcome to VectoJS WebOS', 16, '#1e293b', true, 570);
-    const pageBody = p('', 12, '#475569', 570);
-    const status = p('', 11, '#94a3b8');
+    const pageTitle = t('Welcome to VectoJS WebOS', 16, '#1e293b', true, BODY_WIDTH);
+    const bodyText = p('', 12, '#475569', BODY_WIDTH);
+    const scroll = new ScrollView({
+      width: BODY_WIDTH,
+      height: 200,
+      scrollPhysics: DOCUMENT_SCROLL_PHYSICS,
+    });
+    scroll.content.add(bodyText);
+    const status = p('', 11);
 
     const history: string[] = [HOME];
     let historyIndex = 0;
 
-    const render = (): void => {
+    /** Show body text and refresh the scroll extent (content grows/shrinks). */
+    const setBody = (text: string): void => {
+      bodyText.setText(text);
+      scroll.content.width = scroll.width;
+      scroll.content.height = Math.max(bodyText.height, scroll.height);
+      scroll.scrollTo(0);
+    };
+
+    const render = async (): Promise<void> => {
       const url = history[historyIndex];
       addressBar.value = url;
-      const page = PAGES[url] ?? {
-        title: `Unknown address: ${url}`,
-        body: 'That page does not exist on the demo web. Try vectojs://home, /docs, /gallery, /roadmap, or /shortcuts.',
-      };
-      pageTitle.setText(page.title);
-      pageBody.setText(page.body);
-      status.setText(`History: ${history.length}  ·  ${historyIndex + 1} of ${history.length}`);
+
+      if (isHttpUrl(url)) {
+        pageTitle.setText(url);
+        setBody('Loading…');
+        status.setText(`Fetching ${url} via proxy…`);
+        addressBar.scene?.markDirty();
+        try {
+          const resp = await fetch(PROXY_URL + encodeURIComponent(url));
+          const data = (await resp.json()) as {
+            title?: string;
+            text?: string;
+            error?: string;
+            truncated?: boolean;
+          };
+          if (resp.ok && data.text) {
+            pageTitle.setText(data.title || url);
+            setBody(data.text);
+            const truncated = data.truncated ? ' · truncated' : '';
+            status.setText(`${url}  ·  ${data.text.length} chars via proxy${truncated}`);
+          } else {
+            pageTitle.setText(`Error: ${url}`);
+            setBody(data.error || `HTTP ${resp.status}`);
+            status.setText('Fetch failed');
+          }
+        } catch {
+          pageTitle.setText(`Error: ${url}`);
+          setBody('Network error — is the proxy reachable?');
+          status.setText('Fetch failed');
+        }
+      } else {
+        const page = PAGES[url] ?? {
+          title: `Unknown address: ${url}`,
+          body: 'That page does not exist on the demo web. Try vectojs://home, /docs, /gallery, /roadmap, /shortcuts, or a real https:// URL.',
+        };
+        pageTitle.setText(page.title);
+        setBody(page.body);
+        status.setText(`History: ${history.length}  ·  ${historyIndex + 1} of ${history.length}`);
+      }
       addressBar.scene?.markDirty();
     };
 
     const navigate = (url: string): void => {
-      const target = url.startsWith('vectojs://') ? url : `vectojs://${url}`;
+      const target = isHttpUrl(url) ? url : url.startsWith('vectojs://') ? url : `vectojs://${url}`;
       history.splice(historyIndex + 1);
       history.push(target);
       historyIndex = history.length - 1;
-      render();
+      void render();
+      syncNavigationState();
     };
+    let backButton: ReturnType<typeof btn>;
+    let forwardButton: ReturnType<typeof btn>;
+
+    const syncNavigationState = (): void => {
+      backButton.disabled = historyIndex <= 0;
+      forwardButton.disabled = historyIndex >= history.length - 1;
+    };
+
     const goBack = (): void => {
       if (historyIndex > 0) {
         historyIndex--;
-        render();
+        void render();
+        syncNavigationState();
       }
     };
     const goForward = (): void => {
       if (historyIndex < history.length - 1) {
         historyIndex++;
-        render();
+        void render();
+        syncNavigationState();
       }
     };
 
@@ -100,23 +230,26 @@ export const browserApp: AppDefinition = {
       if (e.key === 'Enter') navigate(addressBar.value);
     });
 
-    const navBar = hstack(
-      [
-        btn('◀ Back', false, goBack),
-        btn('Forward ▶', false, goForward),
-        btn('🏠 Home', false, () => navigate(HOME)),
-        btn('📖 Docs', false, () => navigate('vectojs://docs')),
-        btn('🎨 Gallery', false, () => navigate('vectojs://gallery')),
-        btn('🗺 Roadmap', false, () => navigate('vectojs://roadmap')),
-      ],
-      6,
-    );
+    const navBar = new Stack({ direction: 'horizontal', gap: 6, wrap: true });
+    backButton = btn('◀ Back', false, goBack);
+    forwardButton = btn('Forward ▶', false, goForward);
+    for (const button of [
+      backButton,
+      forwardButton,
+      btn('🏠 Home', false, () => navigate(HOME)),
+      btn('📖 Docs', false, () => navigate('vectojs://docs')),
+      btn('🎨 Gallery', false, () => navigate('vectojs://gallery')),
+      btn('🗺 Roadmap', false, () => navigate('vectojs://roadmap')),
+    ]) {
+      navBar.add(button);
+    }
+    syncNavigationState();
 
-    const stack = vstack(
-      [navBar, addressBar, new HRule(), pageTitle, pageBody, new HRule(), status],
-      10,
-    );
-    render();
-    return new ClientRoot(stack, 18);
+    const top = vstack([navBar, addressBar, new HRule(), pageTitle], 10);
+    const bottom = vstack([new HRule(), status], 10);
+    const layout = new BrowserLayout(top, scroll, bottom, 10);
+
+    void render();
+    return new ClientRoot(layout, 18);
   },
 };
